@@ -37,16 +37,16 @@
             this.labelLoading.AutoSize = true;
             this.labelLoading.Location = new System.Drawing.Point(13, 13);
             this.labelLoading.Name = "labelLoading";
-            this.labelLoading.Size = new System.Drawing.Size(222, 13);
+            this.labelLoading.Size = new System.Drawing.Size(178, 13);
             this.labelLoading.TabIndex = 0;
-            this.labelLoading.Text = "This may take several seconds. Please wait...";
+            this.labelLoading.Text = "This may take a while. Please wait...";
             this.labelLoading.UseWaitCursor = true;
             // 
             // LoadingWindow
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(274, 36);
+            this.ClientSize = new System.Drawing.Size(204, 36);
             this.ControlBox = false;
             this.Controls.Add(this.labelLoading);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;

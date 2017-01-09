@@ -1,6 +1,6 @@
 ﻿/* 
- * The code is currently messy, because I rushed to get a working prototype done.
- * I intend to clean up, organize, and improve the code after I get a job and have more time.
+ * The code for running Connection Cartographer.
+ * Please contact Michael Duncan <duncan.72@wright.edu> if you have any questions.
  */
 
 using SharpPcap;
@@ -105,7 +105,7 @@ namespace ConnectionCartographer
         /**
          * The MainForm constructor enables double buffering to remove
          * flicker from the list view, and it also starts the packet
-         * capture worker thread.
+         * capture worker thread and adds gmap overlays.
          */
         public MainForm()
         {
@@ -120,6 +120,13 @@ namespace ConnectionCartographer
             // Remove flickering from the list views
             DoubleBuffering.doubleBuffering(listViewConnections, true);
             DoubleBuffering.doubleBuffering(listViewDetails, true);
+
+            // Add overlays
+            lineOverlay = new GMapOverlay("lineOverlay");
+            gmap.Overlays.Add(lineOverlay);
+            markerOverlay = new GMapOverlay("markerOverlay");
+            gmap.Overlays.Add(markerOverlay);
+            map = gmap;
 
             // Initialise and start the packet capture worker thread
             workerThread = new Thread(new ThreadStart(this.packetCapture));
@@ -147,8 +154,15 @@ namespace ConnectionCartographer
             LoadingWindow loadingWindow = new LoadingWindow();
             loadingWindow.Show();
             loadingWindow.Update();
-            hostIP = GetPublicIP.getPublicIP(); // Get the host IP address
-            // TODO: Handle if getting the IP fails
+            // TODO: Handle this better if getting the IP fails
+            try
+            {
+                hostIP = GetPublicIP.getPublicIP(); // Get the host IP address
+            }
+            catch (System.Exception)
+            {
+                ErrorExit();
+            }
             loadingWindow.Close();
             // Mark the host location on the map
             try
@@ -188,7 +202,8 @@ namespace ConnectionCartographer
             if (devices.Count < 1)
             {
                 Console.WriteLine("No network device has been found on this machine");
-                // TODO: Quit and display error
+                // TODO: Quit and display a more appropriate error
+                ErrorExit();
                 return;
             }
 
@@ -378,64 +393,12 @@ namespace ConnectionCartographer
                                     if (connection.hostPorts.Contains(hostPort))
                                     {
                                         exists = true;
-                                        // Update the most recent timestamp
-                                        connection.timestampRecent = time.ToLocalTime().Hour + ":" +
-                                                    time.ToLocalTime().Minute + ":" + time.ToLocalTime().Second;
 
-                                        // Update the opacity
-                                        connection.opacity = (float)1.0;
+                                        // Update the timestamp, opacity, bytes sent/received, and line visibility
+                                        updateTOBV(connection, time, outgoing, len);
 
-                                        // Update the bytes sent/received
-                                        if (outgoing)
-                                        {
-                                            connection.bytesSent += len;
-                                            connection.downloading = false;
-                                        }
-                                        else
-                                        {
-                                            connection.bytesReceived += len;
-                                            connection.downloading = true;
-                                        }
-
-                                        lock (connectionLinesLock)
-                                        {
-                                            // Is there already a line visible for this connection?
-                                            if (connectionLines.ContainsKey(connection.id))
-                                            {
-                                                // Update the line's duration and downloading status
-                                                connectionLines[connection.id].duration = LINEDURATION;
-                                                connectionLines[connection.id].downloading = connection.downloading;
-                                            }
-                                            // There isn't, so make the line visible
-                                            else
-                                            {
-                                                ConnectionLine line = new ConnectionLine();
-                                                line.id = connection.id;
-                                                line.duration = LINEDURATION;
-                                                line.downloading = connection.downloading;
-                                                connectionLines.Add(connection.id, line);
-                                                if (lineOverlay.Polygons.Count > connection.id)
-                                                {
-                                                    lineOverlay.Polygons[connection.id].IsVisible = true;
-                                                }
-                                            }
-                                        }
-
-                                        // Update the duration, but only if it has degraded more than
-                                        // one eight from the max
-                                        if (connection.duration < (FADEOUTDURATION - (FADEOUTDURATION / 8)))
-                                        {
-                                            connection.duration = FADEOUTDURATION;
-                                            lock (fadeoutLock)
-                                            {
-                                                //Is this connection not listed as an active connection?
-                                                if (!activeConnections.ContainsKey(connection.id))
-                                                {
-                                                    // Add this connection as an active connection
-                                                    activeConnections.Add(connection.id, connection);
-                                                }
-                                            }
-                                        }
+                                        // Update the duration
+                                        updateDuration(connection);
 
                                         // Update the details view, but only if we need to
                                         if (connection.id == (previousSelectedMarkerIndex - 1))
@@ -511,48 +474,9 @@ namespace ConnectionCartographer
                                                    ((connection.processName == "?") && (processName != "?")))
                                                 {
                                                     exists = true;
-                                                    // Update the most recent timestamp
-                                                    connection.timestampRecent = time.ToLocalTime().Hour + ":" +
-                                                        time.ToLocalTime().Minute + ":" + time.ToLocalTime().Second;
 
-                                                    // Update the opacity
-                                                    connection.opacity = (float)1.0;
-
-                                                    // Update the bytes sent/received
-                                                    if (outgoing)
-                                                    {
-                                                        connection.bytesSent += len;
-                                                        connection.downloading = false;
-                                                    }
-                                                    else
-                                                    {
-                                                        connection.bytesReceived += len;
-                                                        connection.downloading = true;
-                                                    }
-
-                                                    lock (connectionLinesLock)
-                                                    {
-                                                        // Is there already a line visible for this connection?
-                                                        if (connectionLines.ContainsKey(connection.id))
-                                                        {
-                                                            // Update the line's duration and downloading status
-                                                            connectionLines[connection.id].duration = LINEDURATION;
-                                                            connectionLines[connection.id].downloading = connection.downloading;
-                                                        }
-                                                        // There isn't, so make the line visible
-                                                        else
-                                                        {
-                                                            ConnectionLine line = new ConnectionLine();
-                                                            line.id = connection.id;
-                                                            line.duration = LINEDURATION;
-                                                            line.downloading = connection.downloading;
-                                                            connectionLines.Add(connection.id, line);
-                                                            if (lineOverlay.Polygons.Count > connection.id)
-                                                            {
-                                                                lineOverlay.Polygons[connection.id].IsVisible = true;
-                                                            }
-                                                        }
-                                                    }
+                                                    // Update the timestamp, opacity, bytes sent/received, and line visibility
+                                                    updateTOBV(connection, time, outgoing, len);
 
                                                     // Update the process name if needed
                                                     if ((connection.processName == "?") && (processName != "?"))
@@ -561,22 +485,8 @@ namespace ConnectionCartographer
                                                         thisForm.updateConnectionsView(connection, index);
                                                     }
 
-                                                    // Update the duration, but only if it has degraded more than
-                                                    // one eight from the max
-                                                    if (connection.duration < (FADEOUTDURATION - (FADEOUTDURATION / 8)))
-                                                    {
-                                                        connection.duration = FADEOUTDURATION;
-
-                                                        lock (fadeoutLock)
-                                                        {
-                                                            //Is this connection not listed as an active connection?
-                                                            if (!activeConnections.ContainsKey(connection.id))
-                                                            {
-                                                                // Add this connection as an active connection
-                                                                activeConnections.Add(connection.id, connection);
-                                                            }
-                                                        }
-                                                    }
+                                                    // Update the duration
+                                                    updateDuration(connection);
 
                                                     // Add the hostport to the list of ports
                                                     connection.hostPorts.Add(hostPort);
@@ -696,51 +606,9 @@ namespace ConnectionCartographer
                                         ((checkConnection.processName == "?") && (processName != "?"))))
                                     {
                                         exists = true;
-                                        // Update the most recent timestamp
-                                        checkConnection.timestampRecent = time.ToLocalTime().Hour + ":" +
-                                                    time.ToLocalTime().Minute + ":" + time.ToLocalTime().Second;
 
-                                        // Update the opacity
-                                        checkConnection.opacity = (float)1.0;
-
-                                        // Update the bytes sent/received
-                                        if (outgoing)
-                                        {
-                                            checkConnection.bytesSent += len;
-                                            checkConnection.downloading = false;
-                                        }
-                                        else
-                                        {
-                                            checkConnection.bytesReceived += len;
-                                            checkConnection.downloading = true;
-                                        }
-
-                                        lock (connectionLinesLock)
-                                        {
-                                            // Is there already a line visible for this connection?
-                                            if (connectionLines.ContainsKey(checkConnection.id))
-                                            {
-                                                // Update the line's duration and downloading status
-                                                connectionLines[checkConnection.id].duration = LINEDURATION;
-                                                connectionLines[checkConnection.id].downloading = checkConnection.downloading;
-                                            }
-                                            // There isn't, so make the line visible
-                                            else
-                                            {
-                                                ConnectionLine line = new ConnectionLine();
-                                                line.id = checkConnection.id;
-                                                line.duration = LINEDURATION;
-                                                line.downloading = checkConnection.downloading;
-                                                connectionLines.Add(checkConnection.id, line);
-                                                lock (fadeoutLock)
-                                                {
-                                                    if (lineOverlay.Polygons.Count > checkConnection.id)
-                                                    {
-                                                        lineOverlay.Polygons[checkConnection.id].IsVisible = true;
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        // Update the timestamp, opacity, bytes sent/received, and line visibility
+                                        updateTOBV(checkConnection, time, outgoing, len);
 
                                         // Add this IP to the list of IPs
                                         checkConnection.ipList.Add(externalIP);
@@ -752,22 +620,8 @@ namespace ConnectionCartographer
                                             thisForm.updateConnectionsView(connection, index);
                                         }
 
-                                        // Update the duration, but only if it has degraded more than
-                                        // one eight from the max
-                                        if (checkConnection.duration < (FADEOUTDURATION - (FADEOUTDURATION / 8)))
-                                        {
-                                            checkConnection.duration = FADEOUTDURATION;
-
-                                            lock (fadeoutLock)
-                                            {
-                                                //Is this connection not listed as an active connection?
-                                                if (!activeConnections.ContainsKey(checkConnection.id))
-                                                {
-                                                    // Add this connection as an active connection
-                                                    activeConnections.Add(checkConnection.id, checkConnection);
-                                                }
-                                            }
-                                        }
+                                        // Update the duration
+                                        updateDuration(checkConnection);
 
                                         // Add the host port to the list of ports
                                         checkConnection.hostPorts.Add(hostPort);
@@ -890,12 +744,84 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Update the timestamp, opacity, bytes sent/received, and line visibility values for a connection.
+         */
+        private static void updateTOBV(Connection connection, DateTime time, bool outgoing, int len)
+        {
+            // Update the most recent timestamp
+            connection.timestampRecent = time.ToLocalTime().Hour + ":" +
+                        time.ToLocalTime().Minute + ":" + time.ToLocalTime().Second;
+
+            // Update the opacity
+            connection.opacity = (float)1.0;
+
+            // Update the bytes sent/received
+            if (outgoing)
+            {
+                connection.bytesSent += len;
+                connection.downloading = false;
+            }
+            else
+            {
+                connection.bytesReceived += len;
+                connection.downloading = true;
+            }
+
+            lock (connectionLinesLock)
+            {
+                // Is there already a line visible for this connection?
+                if (connectionLines.ContainsKey(connection.id))
+                {
+                    // Update the line's duration and downloading status
+                    connectionLines[connection.id].duration = LINEDURATION;
+                    connectionLines[connection.id].downloading = connection.downloading;
+                }
+                // There isn't, so make the line visible
+                else
+                {
+                    ConnectionLine line = new ConnectionLine();
+                    line.id = connection.id;
+                    line.duration = LINEDURATION;
+                    line.downloading = connection.downloading;
+                    connectionLines.Add(connection.id, line);
+                    if (lineOverlay.Polygons.Count > connection.id)
+                    {
+                        lineOverlay.Polygons[connection.id].IsVisible = true;
+                    }
+                }
+            }
+        }
+
+        /**
+         * Update the connection duration, but only if it has degraded more than one eighth from the max.
+         */
+        private static void updateDuration(Connection connection)
+        {
+            if (connection.duration < (FADEOUTDURATION - (FADEOUTDURATION / 8)))
+            {
+                connection.duration = FADEOUTDURATION;
+                lock (fadeoutLock)
+                {
+                    //Is this connection not listed as an active connection?
+                    if (!activeConnections.ContainsKey(connection.id))
+                    {
+                        // Add this connection as an active connection
+                        activeConnections.Add(connection.id, connection);
+                    }
+                }
+            }
+        }
+
         //----------------------------------------------------------------------------
         #endregion
 
         #region Display / Update Views
         //----------------------------------------------------------------------------
 
+        /**
+         * Displays the connection view (upper left view) information.
+         */
         private void displayConnection(Connection connection)
         {
             if (this.listViewConnections.InvokeRequired)
@@ -931,6 +857,9 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Displays the details view (bottom left view) information.
+         */
         private void displayDetailsView()
         {
             try
@@ -972,6 +901,9 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Updates the connections view information.
+         */
         private void updateConnectionsView(Connection connection, int index)
         {
             try
@@ -1024,6 +956,9 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Updates the details view information.
+         */
         private void updateDetailsView()
         {
             try
@@ -1052,6 +987,9 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Updates the list fadeout in the connections view.
+         */
         private void updateListFadeout(int id)
         {
             try
@@ -1082,6 +1020,9 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Updates the map markers.
+         */
         private void updateMarker(int id, float alpha)
         {
             try
@@ -1155,13 +1096,22 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Updates the data queue text and color.
+         */
         private void changeDataQueueText(int queueSize)
         {
             if (this.listViewConnections.InvokeRequired)
             {
                 UpdateDataQueueCallback d = new UpdateDataQueueCallback(changeDataQueueText);
-                // TODO: HAD ERROR HERE ON CLOSING PROGRAM
-                this.Invoke(d, new object[] { queueSize });
+                try
+                {
+                    this.Invoke(d, new object[] { queueSize });
+                }
+                catch (System.Exception)
+                {
+                    // Unexpected exception on closing
+                }
             }
             else
             {
@@ -1186,6 +1136,9 @@ namespace ConnectionCartographer
         #region Events
         //----------------------------------------------------------------------------
 
+        /**
+         * Initialize Connection Cartorgapher information. Called when the form loads.
+         */
         private void MainForm_Load(object sender, EventArgs e)
         {
             // Set the image lists for the connections and details views
@@ -1208,14 +1161,6 @@ namespace ConnectionCartographer
 
             // Allow mousewheel scrolling while the mouse is over a marker
             gmap.IgnoreMarkerOnMouseWheel = true;
-
-            lineOverlay = new GMapOverlay("lineOverlay");
-            gmap.Overlays.Add(lineOverlay);
-
-            // Add markers
-            markerOverlay = new GMapOverlay("markerOverlay");
-            gmap.Overlays.Add(markerOverlay);
-            map = gmap;
 
             // Set the default details text
             ListViewItem defaultDetails = new ListViewItem();
@@ -1254,12 +1199,18 @@ namespace ConnectionCartographer
             dataQueueTextTimer.Enabled = true;
         }
 
+        /**
+         * End Connection Cartographer. Called when the form closes.
+         */
         private void MainForm_FormClosed(object sender, FormClosedEventArgs e)
         {
             // Set running to false so that the capture loop ends
             running = false;
         }     
 
+        /**
+         * Add relevant packets to the packet queue. Called whenever a packet arrives.
+         */
         private void device_OnPacketArrival(object sender, CaptureEventArgs e)
         {
             var packet = PacketDotNet.Packet.ParsePacket(e.Packet.LinkLayerType, e.Packet.Data);
@@ -1319,12 +1270,17 @@ namespace ConnectionCartographer
             }
         }
 
-        // Make the connections list unfocusable
+        /**
+         * Make the connections list unfocusable.
+         */
         private void listViewConnections_Enter(object sender, EventArgs e)
         {
             gmap.Focus();
         }
 
+        /**
+         * Update marker display when a listview item is selected.
+         */
         private void listViewConnections_ItemSelectionChanged(object sender, ListViewItemSelectionChangedEventArgs e)
         {
             GMarkerGoogle oldMarker;
@@ -1424,6 +1380,9 @@ namespace ConnectionCartographer
             previousSelectedMarkerIndex = index;
         }
 
+        /**
+         * Display the help view when the help button is clicked.
+         */
         private void buttonHelp_Click(object sender, EventArgs e)
         {
             // If the help window has not already been disposed, then show it
@@ -1445,7 +1404,9 @@ namespace ConnectionCartographer
             }
         }
 
-        // Reset the connections
+        /**
+         * Reset the connections when the reset button is clicked.
+         */
         private void buttonReset_Click(object sender, EventArgs e)
         {
             if (initialized)
@@ -1535,12 +1496,13 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Change the selected connection when a connection marker is clicked.
+         */
         private void gmap_OnMarkerClick(GMapMarker item, MouseEventArgs e)
         {
             int markerIndex = 0;
 
-            //lock (fadeoutLock)
-            //{
             foreach (GMarkerGoogle marker in markerOverlay.Markers)
             {
                 if (marker.Equals(item))
@@ -1560,17 +1522,22 @@ namespace ConnectionCartographer
                     listViewConnections.Items[markerIndex - 1].Selected = true;
                 }
             }
-            //}
         }
 
         #region Periodic Timer Events
         //----------------------------------------------------------------------------
 
+        /**
+         * Periodically update the list of socket information.
+         */
         private void updateSocketList(object source, ElapsedEventArgs e)
         {
             openSockets = NetStatPortProcess.getNetStatPorts();
         }
 
+        /**
+         * Periodically update the connection line display.
+         */
         private void updateLineDisplay(object source, ElapsedEventArgs e)
         {
             List<int> removeIDs = new List<int>();
@@ -1591,24 +1558,22 @@ namespace ConnectionCartographer
             {
                 lock (connectionLinesLock)
                 {
-                    //lock (fadeoutLock)
-                    //{
                     connectionLines.Remove(id);
                     if (lineOverlay.Polygons.Count > id)
                     {
                         lineOverlay.Polygons[id].IsVisible = false;
                     }
-                    //}
                 }
             }
         }
 
+        /**
+         * Periodically update the connection line animation.
+         */
         private void lineAnimation(object source, ElapsedEventArgs e)
         {
             lock (connectionLinesLock)
             {
-                //lock (fadeoutLock)
-                //{
                 foreach (ConnectionLine line in connectionLines.Values)
                 {
                     if (lineOverlay.Polygons.Count > line.id)
@@ -1632,10 +1597,12 @@ namespace ConnectionCartographer
                         }
                     }
                 }
-                //}
             }
         }
 
+        /**
+         * Periodically update the connection line and marker transparency.
+         */
         private void updateTransparency(object source, ElapsedEventArgs e)
         {
             List<int> removeIDs = new List<int>();
@@ -1667,6 +1634,9 @@ namespace ConnectionCartographer
             }
         }
 
+        /**
+         * Periodically update the data queue text.
+         */
         private void updateDataQueueText(object source, ElapsedEventArgs e)
         {
             changeDataQueueText(packetQueueSize);
@@ -1674,6 +1644,24 @@ namespace ConnectionCartographer
 
         //----------------------------------------------------------------------------
         #endregion
+
+        //----------------------------------------------------------------------------
+        #endregion
+
+        #region Other Functions
+        //----------------------------------------------------------------------------
+
+        /** 
+         * Exit the app if something bad happened
+         */
+        private void ErrorExit()
+        {
+            // Set running to false so that the capture loop ends
+            running = false;
+
+            MessageBox.Show("Undefined Error: Please Re-run the Application");
+            Application.Exit();
+        }
 
         //----------------------------------------------------------------------------
         #endregion
